@@ -1,0 +1,115 @@
+import requests
+import os
+import uuid
+
+# =========================
+# CONFIGURAÇÕES
+# =========================
+
+TRANSLATOR_ENDPOINT = "https://api.cognitive.microsofttranslator.com"
+TRANSLATOR_KEY = os.getenv("TRANSLATOR_KEY")
+TRANSLATOR_REGION = "brazilsouth"
+CUSTOM_MODEL_ID = "custom-it-v1"
+
+OPENAI_ENDPOINT = "https://<openai-resource>.openai.azure.com"
+OPENAI_DEPLOYMENT = "gpt-4o-mini"
+OPENAI_KEY = os.getenv("OPENAI_KEY")
+OPENAI_API_VERSION = "2024-02-15-preview"
+
+
+# =========================
+# FUNÇÃO: TRADUÇÃO
+# =========================
+def translate_text(text, source_lang="en", target_lang="pt"):
+    url = (
+        f"{TRANSLATOR_ENDPOINT}/translate"
+        f"?api-version=3.0"
+        f"&from={source_lang}"
+        f"&to={target_lang}"
+        f"&category={CUSTOM_MODEL_ID}"
+    )
+
+    headers = {
+        "Ocp-Apim-Subscription-Key": TRANSLATOR_KEY,
+        "Ocp-Apim-Subscription-Region": TRANSLATOR_REGION,
+        "Content-Type": "application/json",
+        "X-ClientTraceId": str(uuid.uuid4())
+    }
+
+    body = [{"text": text}]
+
+    response = requests.post(url, headers=headers, json=body, timeout=30)
+    response.raise_for_status()
+
+    return response.json()[0]["translations"][0]["text"]
+
+
+# =========================
+# FUNÇÃO: REVISÃO TÉCNICA
+# =========================
+def review_with_openai(translated_text):
+    url = (
+        f"{OPENAI_ENDPOINT}/openai/deployments/"
+        f"{OPENAI_DEPLOYMENT}/chat/completions"
+        f"?api-version={OPENAI_API_VERSION}"
+    )
+
+    headers = {
+        "api-key": OPENAI_KEY,
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Você é um revisor técnico especializado em documentação "
+                    "de infraestrutura de TI corporativa."
+                )
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Revise o texto abaixo mantendo rigor técnico, "
+                    "sem simplificar termos ou alterar siglas:\n\n"
+                    f"{translated_text}"
+                )
+            }
+        ],
+        "temperature": 0.2,
+        "max_tokens": 400
+    }
+
+    response = requests.post(url, headers=headers, json=payload, timeout=30)
+    response.raise_for_status()
+
+    return response.json()["choices"][0]["message"]["content"]
+
+
+# =========================
+# PIPELINE COMPLETO
+# =========================
+def translate_article(text):
+    print("🔄 Traduzindo texto...")
+    translated = translate_text(text)
+
+    print("🧠 Revisando tradução com Azure OpenAI...")
+    reviewed = review_with_openai(translated)
+
+    return reviewed
+
+
+# =========================
+# EXEMPLO DE USO
+# =========================
+if __name__ == "__main__":
+    original_text = (
+        "Failover was triggered due to a network degradation "
+        "in the SD-WAN environment."
+    )
+
+    final_translation = translate_article(original_text)
+
+    print("\n✅ TEXTO FINAL:")
+    print(final_translation)
