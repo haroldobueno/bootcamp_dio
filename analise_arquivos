@@ -1,0 +1,117 @@
+pip install azure-ai-formrecognizer azure-core
+
+export AZURE_FORMRECOGNIZER_ENDPOINT="https://<resource>.cognitiveservices.azure.com/"
+export AZURE_FORMRECOGNIZER_KEY="<SUA_CHAVE>"
+
+import os
+from datetime import datetime
+from azure.ai.formrecognizer import DocumentAnalysisClient
+from azure.core.credentials import AzureKeyCredential
+
+# =========================
+# CONFIGURAÇÃO
+# =========================
+ENDPOINT = os.getenv("AZURE_FORMRECOGNIZER_ENDPOINT")
+KEY = os.getenv("AZURE_FORMRECOGNIZER_KEY")
+
+client = DocumentAnalysisClient(
+    endpoint=ENDPOINT,
+    credential=AzureKeyCredential(KEY)
+)
+
+# =========================
+# EXTRAÇÃO DE DADOS
+# =========================
+def extract_document_data(file_path):
+    with open(file_path, "rb") as f:
+        poller = client.begin_analyze_document(
+            model_id="prebuilt-invoice",  # pode ser custom
+            document=f
+        )
+    result = poller.result()
+
+    data = {}
+
+    for doc in result.documents:
+        for name, field in doc.fields.items():
+            data[name] = field.value if field.value else None
+
+    return data
+
+
+# =========================
+# REGRAS ANTIFRAUDE
+# =========================
+def fraud_analysis(data):
+    score = 0
+    alerts = []
+
+    # Regra 1 – Valor muito alto
+    total = data.get("TotalAmount")
+    if total and total > 50000:
+        score += 30
+        alerts.append("Valor total acima do limite esperado")
+
+    # Regra 2 – Data futura
+    invoice_date = data.get("InvoiceDate")
+    if invoice_date:
+        if invoice_date > datetime.now().date():
+            score += 25
+            alerts.append("Data do documento é futura")
+
+    # Regra 3 – Fornecedor ausente
+    vendor = data.get("VendorName")
+    if not vendor:
+        score += 20
+        alerts.append("Fornecedor não identificado")
+
+    # Regra 4 – Campos críticos ausentes
+    required_fields = ["InvoiceId", "VendorName", "TotalAmount"]
+    for field in required_fields:
+        if not data.get(field):
+            score += 10
+            alerts.append(f"Campo obrigatório ausente: {field}")
+
+    # Classificação final
+    if score >= 60:
+        risk = "ALTO"
+    elif score >= 30:
+        risk = "MÉDIO"
+    else:
+        risk = "BAIXO"
+
+    return {
+        "score": score,
+        "risk_level": risk,
+        "alerts": alerts
+    }
+
+
+# =========================
+# PIPELINE COMPLETO
+# =========================
+def analyze_document(file_path):
+    print("📄 Extraindo dados do documento...")
+    data = extract_document_data(file_path)
+
+    print("🔍 Executando análise antifraude...")
+    fraud_result = fraud_analysis(data)
+
+    return {
+        "extracted_data": data,
+        "fraud_analysis": fraud_result
+    }
+
+
+# =========================
+# EXEMPLO DE USO
+# =========================
+if __name__ == "__main__":
+    result = analyze_document("nota_fiscal.pdf")
+
+    print("\n📊 RESULTADO FINAL")
+    print("Nível de risco:", result["fraud_analysis"]["risk_level"])
+    print("Score:", result["fraud_analysis"]["score"])
+    print("Alertas:")
+    for alert in result["fraud_analysis"]["alerts"]:
+        print("-", alert)
